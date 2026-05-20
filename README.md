@@ -1,20 +1,43 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Cloud Shield
 
-# Run and deploy your AI Studio app
+A comprehensive cloud security and data governance platform designed to protect your data assets and ensure compliance across your cloud infrastructure.
 
-This contains everything you need to run your app locally.
+## Features
 
-View your app in AI Studio: https://ai.studio/apps/548b6cca-8220-4d53-8021-4c1671955c7b
+- **Security Access Control** - Manage user permissions and access policies
+- **Data Quality Monitoring** - Track and maintain data quality metrics
+- **Data Governance** - Enforce data policies and standards
+- **Alerts & Monitoring** - Real-time security alerts and system monitoring
+- **Reports & Analytics** - Detailed reporting and insights
+- **Dashboard** - Centralized overview of your security posture
 
-## Run Locally
+## Getting Started
 
-**Prerequisites:**  Node.js
-
+**Prerequisites:**  Node.js (v16 or higher)
 
 1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+   ```bash
+   npm install
+   ```
+
+2. Configure your environment variables in `.env.local`:
+   ```
+   VITE_API_URL=your_api_url
+   ```
+
+3. Run the development server:
+   ```bash
+   npm run dev
+   ```
+
+4. Open your browser and navigate to `http://localhost:5173`
+
+## Building for Production
+
+```bash
+npm run build
+```
+
+## License
+
+MIT
