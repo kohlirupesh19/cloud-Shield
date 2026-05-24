@@ -20,7 +20,17 @@
         "./*"
       ]
     },
+    "types": [
+      "vite/client"
+    ],
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  "include": [
+    "src/**/*"
+  ],
+  "exclude": [
+    "backend/**/*",
+    "node_modules/**/*"
+  ]
 }

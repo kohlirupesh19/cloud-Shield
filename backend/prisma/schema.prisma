@@ -1,0 +1,396 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  ORG_ADMIN
+  SECURITY_ANALYST
+  GOVERNANCE_OFFICER
+  DATA_ENGINEER
+  VIEWER
+}
+
+enum AnalysisType {
+  QUALITY
+  SECURITY
+  GOVERNANCE
+  COMPLIANCE
+  COMBINED
+}
+
+enum AnalysisStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  PARTIAL
+}
+
+enum SeverityLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+  IN_APP
+  WEBHOOK
+}
+
+enum SessionStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+
+model Organization {
+  id            String       @id @default(cuid())
+  name          String
+  slug          String       @unique
+  isActive      Boolean      @default(true)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  deletedAt     DateTime?
+  users          User[]
+  projects       Project[]
+  apiKeys        ApiKey[]
+  policies       GovernancePolicy[]
+  documents      ComplianceDocument[]
+  datasets       Dataset[]
+  analyses       Analysis[]
+  reports        AiReport[]
+  notifications  Notification[]
+  sessions       Session[]
+  auditLogs      AuditLog[]
+  securityEvents SecurityEvent[]
+  vectors        VectorMetadata[]
+  scheduledJobs  ScheduledJob[]
+  settings       OrganizationSettings?
+
+  @@index([slug, deletedAt])
+}
+
+model User {
+  id                String      @id @default(cuid())
+  organizationId    String
+  email             String
+  fullName          String
+  passwordHash      String
+  role              Role
+  isEmailVerified   Boolean     @default(false)
+  emailVerifyToken  String?
+  resetToken        String?
+  resetTokenExpires DateTime?
+  failedLoginCount  Int         @default(0)
+  lockedUntil       DateTime?
+  lastLoginAt       DateTime?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  deletedAt         DateTime?
+
+  organization        Organization @relation(fields: [organizationId], references: [id])
+  projects            Project[]
+  datasets            Dataset[]
+  analyses            Analysis[]
+  reports             AiReport[]
+  notifications       Notification[]
+  apiKeys             ApiKey[]
+  sessions            Session[]
+  auditLogs           AuditLog[]
+  complianceDocuments ComplianceDocument[]
+
+  @@unique([organizationId, email])
+  @@index([organizationId, role, deletedAt])
+}
+
+model Project {
+  id             String      @id @default(cuid())
+  organizationId String
+  createdById    String
+  name           String
+  description    String?
+  isActive       Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  deletedAt      DateTime?
+
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  createdBy      User         @relation(fields: [createdById], references: [id])
+  datasets       Dataset[]
+  analyses       Analysis[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, deletedAt])
+}
+
+model Dataset {
+  id             String      @id @default(cuid())
+  organizationId String
+  projectId      String
+  uploadedById   String
+  name           String
+  fileType       String
+  storagePath    String
+  sourceHash     String
+  sizeBytes      BigInt
+  rowCount       Int?
+  metadata       Json?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  deletedAt      DateTime?
+
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  project        Project      @relation(fields: [projectId], references: [id])
+  uploadedBy     User         @relation(fields: [uploadedById], references: [id])
+  analyses       Analysis[]
+
+  @@index([organizationId, projectId, createdAt])
+  @@index([sourceHash])
+}
+
+model Analysis {
+  id               String       @id @default(cuid())
+  organizationId   String
+  projectId        String
+  datasetId        String?
+  requestedById    String
+  type             AnalysisType
+  status           AnalysisStatus @default(QUEUED)
+  inputPayload     Json
+  summary          String?
+  confidence       Float?
+  riskScore        Float?
+  startedAt        DateTime?
+  completedAt      DateTime?
+  errorMessage     String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  deletedAt        DateTime?
+
+  organization     Organization @relation(fields: [organizationId], references: [id])
+  project          Project      @relation(fields: [projectId], references: [id])
+  dataset          Dataset?     @relation(fields: [datasetId], references: [id])
+  requestedBy      User         @relation(fields: [requestedById], references: [id])
+  report           AiReport?
+  securityEvents   SecurityEvent[]
+  vectors          VectorMetadata[]
+
+  @@index([organizationId, type, status, createdAt])
+}
+
+model AiReport {
+  id               String       @id @default(cuid())
+  organizationId   String
+  analysisId       String       @unique
+  createdById      String
+  reportType       String
+  title            String
+  markdownContent  String
+  jsonPayload      Json
+  pdfPath          String?
+  csvPath          String?
+  version          Int          @default(1)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  deletedAt        DateTime?
+
+  organization     Organization @relation(fields: [organizationId], references: [id])
+  analysis         Analysis     @relation(fields: [analysisId], references: [id])
+  createdBy        User         @relation(fields: [createdById], references: [id])
+
+  @@index([organizationId, reportType, createdAt])
+}
+
+model ComplianceDocument {
+  id               String       @id @default(cuid())
+  organizationId   String
+  uploadedById     String
+  standard         String
+  title            String
+  filePath         String
+  mimeType         String
+  chunkCount       Int          @default(0)
+  embeddingModel   String?
+  metadata         Json?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  deletedAt        DateTime?
+
+  organization     Organization @relation(fields: [organizationId], references: [id])
+  uploadedBy       User         @relation(fields: [uploadedById], references: [id])
+  vectors          VectorMetadata[]
+
+  @@index([organizationId, standard, createdAt])
+}
+
+model AuditLog {
+  id               String       @id @default(cuid())
+  organizationId   String
+  actorId          String?
+  action           String
+  resourceType     String
+  resourceId       String?
+  ipAddress        String?
+  userAgent        String?
+  details          Json?
+  createdAt        DateTime     @default(now())
+
+  organization     Organization @relation(fields: [organizationId], references: [id])
+  actor            User?        @relation(fields: [actorId], references: [id])
+
+  @@index([organizationId, action, createdAt])
+}
+
+model SecurityEvent {
+  id               String       @id @default(cuid())
+  organizationId   String
+  analysisId       String?
+  eventType        String
+  severity         SeverityLevel
+  threatScore      Float
+  source           String
+  eventPayload     Json
+  detectedAt       DateTime     @default(now())
+  resolvedAt       DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  organization     Organization @relation(fields: [organizationId], references: [id])
+  analysis         Analysis?    @relation(fields: [analysisId], references: [id])
+
+  @@index([organizationId, severity, detectedAt])
+}
+
+model GovernancePolicy {
+  id               String       @id @default(cuid())
+  organizationId   String
+  name             String
+  framework        String
+  policyVersion    String
+  rules            Json
+  isActive         Boolean      @default(true)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  deletedAt        DateTime?
+
+  organization     Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, name, policyVersion])
+  @@index([organizationId, framework, isActive])
+}
+
+model Notification {
+  id               String               @id @default(cuid())
+  organizationId   String
+  userId           String
+  channel          NotificationChannel
+  title            String
+  message          String
+  isRead           Boolean              @default(false)
+  sentAt           DateTime?
+  createdAt        DateTime             @default(now())
+
+  organization     Organization @relation(fields: [organizationId], references: [id])
+  user             User         @relation(fields: [userId], references: [id])
+
+  @@index([organizationId, userId, isRead, createdAt])
+}
+
+model ApiKey {
+  id               String       @id @default(cuid())
+  organizationId   String
+  userId           String
+  name             String
+  keyHash          String       @unique
+  lastUsedAt       DateTime?
+  expiresAt        DateTime?
+  isRevoked        Boolean      @default(false)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  organization     Organization @relation(fields: [organizationId], references: [id])
+  user             User         @relation(fields: [userId], references: [id])
+
+  @@index([organizationId, userId, isRevoked])
+}
+
+model Session {
+  id               String       @id @default(cuid())
+  organizationId   String
+  userId           String
+  refreshTokenHash String       @unique
+  status           SessionStatus @default(ACTIVE)
+  ipAddress        String?
+  userAgent        String?
+  expiresAt        DateTime
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  organization     Organization @relation(fields: [organizationId], references: [id])
+  user             User         @relation(fields: [userId], references: [id])
+
+  @@index([organizationId, userId, status, expiresAt])
+}
+
+model VectorMetadata {
+  id                   String       @id @default(cuid())
+  organizationId       String
+  analysisId           String?
+  complianceDocumentId String?
+  faissIndexName       String
+  chunkId              String
+  sourceType           String
+  sourceRef            String
+  metadata             Json
+  createdAt            DateTime     @default(now())
+
+  organization         Organization      @relation(fields: [organizationId], references: [id])
+  analysis             Analysis?         @relation(fields: [analysisId], references: [id])
+  complianceDocument   ComplianceDocument? @relation(fields: [complianceDocumentId], references: [id])
+
+  @@index([organizationId, faissIndexName, sourceType])
+}
+
+model ScheduledJob {
+  id               String       @id @default(cuid())
+  organizationId   String?
+  name             String
+  cronExpression   String
+  isEnabled        Boolean      @default(true)
+  lastRunAt        DateTime?
+  nextRunAt        DateTime?
+  lastStatus       String?
+  metadata         Json?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  organization     Organization? @relation(fields: [organizationId], references: [id])
+
+  @@index([name, isEnabled])
+}
+
+model OrganizationSettings {
+  id               String       @id @default(cuid())
+  organizationId   String       @unique
+  orgName          String       @default("Government of India — IT Dept.")
+  cloudRegion      String       @default("ap-south-1 (Mumbai)")
+  auditFrequency   String       @default("Daily")
+  emailAlerts      Boolean      @default(true)
+  smsAlerts        Boolean      @default(false)
+  alertThreshold   String       @default("Warning & above")
+  activeFrameworks Json         @default("[\"PDPB 2023\", \"ISO 27001\"]")
+  retentionPeriod  String       @default("365 days")
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}

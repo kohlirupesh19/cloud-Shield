@@ -1,0 +1,9 @@
+.env
+.env.*
+venv
+node_modules
+tests
+docker
+__pycache__
+.pytest_cache
+.git

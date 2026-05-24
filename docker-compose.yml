@@ -1,0 +1,114 @@
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend.dev
+    ports:
+      - '3000:3000'
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      VITE_API_URL: http://localhost:4000/api
+    depends_on:
+      - backend
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    ports:
+      - '4000:4000'
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    env_file:
+      - ./backend/.env.example
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/cloudshield
+      - REDIS_URL=redis://redis:6379
+      - AI_ENGINE_URL=http://ai-engine:8000
+      - MAX_UPLOAD_MB=1024
+    depends_on:
+      - postgres
+      - redis
+      - ai-engine
+
+  ai-engine:
+    build:
+      context: ./ai-engine
+    ports:
+      - '8000:8000'
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - OLLAMA_ENABLED=true
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - MODEL_QUALITY=qwen2.5:3b-instruct-q4_K_M
+      - MODEL_SECURITY=llama3.2:3b-instruct-q4_K_M
+      - MODEL_GOVERNANCE=qwen2.5:3b-instruct-q4_K_M
+      - MODEL_COMPLIANCE=qwen2.5:3b-instruct-q4_K_M
+      - MODEL_REASONING=phi3:mini
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - '11434:11434'
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ['CMD', 'ollama', 'list']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  ollama-pull:
+    image: ollama/ollama:latest
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - OLLAMA_MODELS=qwen2.5:3b-instruct-q4_K_M llama3.2:3b-instruct-q4_K_M phi3:mini
+    entrypoint: ['/bin/sh', '-lc']
+    command: |
+      set -e
+      echo "Waiting for Ollama service..."
+      until ollama list >/dev/null 2>&1; do
+        sleep 2
+      done
+      echo "Pulling models: $$OLLAMA_MODELS"
+      for model in $$OLLAMA_MODELS; do
+        ollama pull "$$model"
+      done
+      echo "Ollama model download complete."
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: cloudshield
+    ports:
+      - '5435:5432'
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - '80:80'
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - frontend
+      - backend
+      - ai-engine
+
+volumes:
+  pg_data:
+  ollama_data:
