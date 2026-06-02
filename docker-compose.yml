@@ -9,7 +9,7 @@ services:
       - .:/app
       - /app/node_modules
     environment:
-      VITE_API_URL: http://localhost:4000/api
+      VITE_API_URL: http://localhost/api
     depends_on:
       - backend
 
@@ -28,6 +28,7 @@ services:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/cloudshield
       - REDIS_URL=redis://redis:6379
       - AI_ENGINE_URL=http://ai-engine:8000
+      - AI_INTERNAL_TOKEN=dev-internal-token-change-me
       - MAX_UPLOAD_MB=1024
     depends_on:
       - postgres
@@ -48,6 +49,7 @@ services:
       - MODEL_GOVERNANCE=qwen2.5:3b-instruct-q4_K_M
       - MODEL_COMPLIANCE=qwen2.5:3b-instruct-q4_K_M
       - MODEL_REASONING=phi3:mini
+      - AI_INTERNAL_TOKEN=dev-internal-token-change-me
 
   ollama:
     image: ollama/ollama:latest

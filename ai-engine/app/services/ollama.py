@@ -35,9 +35,10 @@ def ask_ollama_json(
     system_prompt: str,
     user_prompt: str,
     fallback: Optional[dict[str, Any]] = None,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], bool]:
+    """Returns (parsed_or_fallback, llm_used). llm_used=False on disabled, parse fail, or exception."""
     if not settings.ollama_enabled:
-        return fallback or {}
+        return (fallback or {}, False)
 
     url = settings.ollama_base_url.rstrip("/") + "/api/chat"
     payload = {
@@ -61,6 +62,8 @@ def ask_ollama_json(
             response.raise_for_status()
             content = response.json().get("message", {}).get("content", "")
             parsed = _extract_json(content)
-            return parsed or (fallback or {})
+            if parsed:
+                return (parsed, True)
+            return (fallback or {}, False)
     except Exception:
-        return fallback or {}
+        return (fallback or {}, False)

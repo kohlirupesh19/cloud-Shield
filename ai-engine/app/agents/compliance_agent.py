@@ -35,7 +35,7 @@ def run_compliance_agent(payload: dict):
             "Named control owner for each framework",
         ]
 
-    llm_result = ask_ollama_json(
+    llm_result, llm_used = ask_ollama_json(
         model=settings.model_compliance,
         system_prompt="You are a compliance analyst. Return only JSON with keys summary, missing_controls, regulatory_suggestions, and confidence_notes.",
         user_prompt=json.dumps(
@@ -65,4 +65,5 @@ def run_compliance_agent(payload: dict):
         "explanation": llm_result.get("summary") or f"Retrieved {matched_controls} control chunks from the FAISS-backed compliance corpus across {len(frameworks)} frameworks.",
         "reasoning": f"Matched {matched_controls} semantically relevant control chunks across {len(frameworks)} frameworks",
         "confidence_notes": llm_result.get("confidence_notes", []),
+        "llm_used": llm_used,
     }

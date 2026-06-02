@@ -16,6 +16,7 @@ class Settings(BaseModel):
     model_compliance: str = os.getenv("MODEL_COMPLIANCE", "qwen2.5:3b-instruct-q4_K_M")
     model_reasoning: str = os.getenv("MODEL_REASONING", "phi3.5")
     embedding_model: str = os.getenv("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+    internal_token: str = os.getenv("AI_INTERNAL_TOKEN", "dev-internal-token-change-me")
 
 
 settings = Settings()

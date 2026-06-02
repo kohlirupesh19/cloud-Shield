@@ -2,32 +2,43 @@ import { clearAuthTokens, getAccessToken, getRefreshToken, setAccessToken } from
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
+let refreshPromise: Promise<string | null> | null = null;
+
 async function refreshAccessToken() {
+  if (refreshPromise) return refreshPromise; // serialize concurrent 401s to one refresh (mutex)
   const refreshToken = getRefreshToken();
   if (!refreshToken) {
     clearAuthTokens();
     return null;
   }
 
-  const res = await fetch(`${API_BASE}/auth/refresh-token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refreshToken }),
-  });
+  refreshPromise = (async () => {
+    try {
+      const res = await fetch(`${API_BASE}/auth/refresh-token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      });
 
-  if (!res.ok) {
-    return null;
-  }
+      if (!res.ok) {
+        return null;
+      }
 
-  const data = await res.json().catch(() => ({}));
-  const nextToken = data?.data?.accessToken;
-  if (typeof nextToken === 'string' && nextToken.length > 0) {
-    setAccessToken(nextToken);
-    return nextToken;
-  }
+      const data = await res.json().catch(() => ({}));
+      const nextToken = data?.data?.accessToken;
+      if (typeof nextToken === 'string' && nextToken.length > 0) {
+        setAccessToken(nextToken);
+        return nextToken;
+      }
 
-  clearAuthTokens();
-  return null;
+      clearAuthTokens();
+      return null;
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
 }
 
 export async function apiFetch(path: string, init: RequestInit = {}) {

@@ -39,7 +39,7 @@ def run_governance_agent(payload: dict):
     verdict = "PASS" if coverage >= 80.0 and not violations else "REVIEW" if coverage >= 55.0 else "BLOCK"
     risk = "LOW" if verdict == "PASS" else "MEDIUM" if verdict == "REVIEW" else "HIGH"
 
-    llm_result = ask_ollama_json(
+    llm_result, llm_used = ask_ollama_json(
         model=settings.model_governance,
         system_prompt="You are a governance reviewer. Return only JSON with keys lineage_explanation, policy_mismatch_report, and next_actions.",
         user_prompt=json.dumps(
@@ -65,4 +65,5 @@ def run_governance_agent(payload: dict):
         "risk_categorization": risk,
         "explanation": llm_result.get("explanation") or "Governance agent mapped live policy definitions against lineage edges and flagged missing ownership or disconnected paths.",
         "next_actions": llm_result.get("next_actions", []),
+        "llm_used": llm_used,
     }

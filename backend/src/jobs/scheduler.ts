@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import logger from '../config/logger';
 import { prisma } from '../config/prisma';
 import redisClient from '../config/redis';
+import { reportStorage } from '../services/reportStorage';
 
 export function startScheduler() {
   cron.schedule('0 * * * *', async () => {
@@ -24,5 +25,15 @@ export function startScheduler() {
         isEnabled: true,
       },
     });
+  });
+
+  // Phase 3-7: periodic cleanup of old local reports (S3 impl would list+delete too)
+  cron.schedule('0 4 * * *', async () => {
+    try {
+      const removed = await reportStorage.cleanupOlderThan(30);
+      if (removed > 0) logger.info({ removed }, 'Old reports cleaned');
+    } catch (e) {
+      logger.warn({ err: e }, 'Report cleanup failed');
+    }
   });
 }

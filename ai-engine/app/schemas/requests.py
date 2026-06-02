@@ -7,6 +7,8 @@ class BaseAnalysisRequest(BaseModel):
     project_id: str
     dataset_id: Optional[str] = None
     payload: Dict[str, Any] = Field(default_factory=dict)
+    mode: Optional[str] = None  # "single" | "combined" for workflow
+    source_hash: Optional[str] = None  # for cache key on dataset sourceHash
 
 
 class ComplianceRequest(BaseAnalysisRequest):

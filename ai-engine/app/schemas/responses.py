@@ -1,14 +1,15 @@
 from pydantic import BaseModel
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 
 class AnalysisResponse(BaseModel):
     success: bool
     analysis_type: str
-    confidence: float
+    confidence: Optional[float] = None
     explanation: str
     result: Dict[str, Any]
     metadata: Dict[str, Any]
+    llm_used: Optional[bool] = None
 
 
 class HealthResponse(BaseModel):

@@ -23,7 +23,7 @@ def run_security_agent(payload: dict):
     risk_score = min(1.0, anomaly_ratio + (sum(e.get("failed_logins", 0) for e in events) / max(1, len(events) * 10)))
 
     level = "CRITICAL" if risk_score > 0.8 else "HIGH" if risk_score > 0.6 else "MEDIUM" if risk_score > 0.3 else "LOW"
-    llm_result = ask_ollama_json(
+    llm_result, llm_used = ask_ollama_json(
         model=settings.model_security,
         system_prompt="You are a security analyst. Return only JSON with keys summary, attack_pattern, remediations, and confidence_notes.",
         user_prompt=json.dumps(
@@ -48,4 +48,5 @@ def run_security_agent(payload: dict):
             "Revoke stale API keys with unusual usage",
         ] + list(llm_result.get("remediations", [])),
         "confidence_notes": llm_result.get("confidence_notes", []),
+        "llm_used": llm_used,
     }

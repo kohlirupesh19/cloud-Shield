@@ -5,104 +5,9 @@ import { prisma } from '../config/prisma';
 import ApiError from '../utils/ApiError';
 import { analysisService } from './analysis.service';
 import { AnalysisType } from '@prisma/client';
-
-function normalizeCustomValue(value: any): any {
-  if (Array.isArray(value)) {
-    return value.map(normalizeCustomValue);
-  }
-
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, normalizeCustomValue(entry)]));
-  }
-
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (trimmed.length === 0) {
-      return value;
-    }
-
-    if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
-      const numeric = Number(trimmed);
-      if (!Number.isNaN(numeric)) {
-        return numeric;
-      }
-    }
-
-    if (trimmed.toLowerCase() === 'true') {
-      return true;
-    }
-
-    if (trimmed.toLowerCase() === 'false') {
-      return false;
-    }
-  }
-
-  return value;
-}
-
-function normalizeRows(rows: any[]) {
-  return rows.map((row) => normalizeCustomValue(row));
-}
-
-function parseDatasetRows(contentStr: string, originalName: string, maxRowsToParse = 5000): { rows: any[]; totalRowCount: number } {
-  const ext = path.extname(originalName).toLowerCase().slice(1);
-
-  if (ext === 'json') {
-    const parsed = JSON.parse(contentStr);
-    const allRows = Array.isArray(parsed) ? parsed : (parsed.rows || [parsed]);
-    const totalRowCount = allRows.length;
-    const rows = allRows.slice(0, maxRowsToParse);
-    return { rows, totalRowCount };
-  }
-
-  if (ext === 'csv') {
-    // 1. Efficiently count total lines (row count)
-    let totalLines = 0;
-    let pos = 0;
-    while ((pos = contentStr.indexOf('\n', pos)) !== -1) {
-      totalLines++;
-      pos++;
-    }
-    if (contentStr.length > 0 && !contentStr.endsWith('\n')) {
-      totalLines++;
-    }
-    const totalRowCount = Math.max(0, totalLines - 1);
-
-    // 2. Efficiently extract only the first maxRowsToParse + 1 lines for parsing
-    let endPos = 0;
-    let lineCount = 0;
-    const targetLines = maxRowsToParse + 1;
-    while (lineCount < targetLines && (endPos = contentStr.indexOf('\n', endPos)) !== -1) {
-      lineCount++;
-      endPos++;
-    }
-    const partToParse = endPos === -1 ? contentStr : contentStr.slice(0, endPos);
-    const lines = partToParse.split(/\r?\n/).filter((line) => line.trim().length > 0);
-
-    if (lines.length > 0) {
-      const headers = lines[0].split(',').map((h) => h.trim().replace(/^["']|["']$/g, ''));
-      const linesToParse = lines.slice(1);
-      const rows = linesToParse.map((line) => {
-        const values = line.split(',').map((v) => v.trim().replace(/^["']|["']$/g, ''));
-        const obj: any = {};
-        headers.forEach((header, index) => {
-          const val = values[index];
-          if (val !== undefined && val !== '') {
-            const num = Number(val);
-            obj[header] = isNaN(num) ? val : num;
-          } else {
-            obj[header] = null;
-          }
-        });
-        return obj;
-      });
-      return { rows, totalRowCount };
-    }
-    return { rows: [], totalRowCount: 0 };
-  }
-
-  return { rows: [{ content: contentStr.slice(0, 1000) }], totalRowCount: 1 };
-}
+import { parseDatasetRows, normalizeRows } from '../utils/datasetParser';
+import { isTransactionOrAccessLog, mapRowsToSecurityLogs } from './securityLogMapper';
+import { securityService } from './security.service'; // normal (no dynamic require) after queue decoupling
 
 export const datasetService = {
   async upload(input: {
@@ -172,15 +77,15 @@ export const datasetService = {
       },
     });
 
-    // 2. Trigger real-time Isolation Forest check
+    // 2. Trigger (enqueue) quality check - non blocking
     let qualityScore = 100.0;
     let anomalyScore = 0.0;
     let issues: string[] = [];
     let recommendations: string[] = [];
-    let analysisResult: Awaited<ReturnType<typeof analysisService.runAnalysis>> | null = null;
+    let analysisId: string | undefined;
 
     try {
-      analysisResult = await analysisService.runAnalysis({
+      const enq = await analysisService.enqueue({
         organizationId: input.organizationId,
         projectId,
         datasetId: dataset.id,
@@ -188,15 +93,10 @@ export const datasetService = {
         type: AnalysisType.QUALITY,
         payload: { rows },
       });
-
-      const innerResult = (analysisResult.result as any)?.result || {};
-      qualityScore = innerResult.quality_score !== undefined ? Number(innerResult.quality_score) : 95.0;
-      anomalyScore = innerResult.anomaly_score !== undefined ? Number(innerResult.anomaly_score) : 0.05;
-      issues = innerResult.issues || [];
-      recommendations = innerResult.recommendations || [];
+      analysisId = enq.analysisId;
+      // scores populated async / via cache on re-validate; initial snapshot uses defaults
     } catch (err) {
-      console.error('Failed to run live Isolation Forest during upload:', err);
-      // Fallback defaults
+      console.error('Failed to enqueue quality during upload:', err);
       qualityScore = 85.0;
     }
 
@@ -220,44 +120,9 @@ export const datasetService = {
     });
 
     // 3.5 Auto-run security behavioral check if the dataset has transaction or access logs
-    const firstRow = rows[0] || {};
-    const keys = Object.keys(firstRow).map(k => k.toLowerCase());
-    const isTransactionOrAccess = keys.includes('user') || keys.includes('ip') || keys.includes('failed_logins') || keys.includes('bytes') || keys.includes('amount') || keys.includes('class');
-
-    if (isTransactionOrAccess) {
-      const mappedLogs = rows.map((row: any) => {
-        const user = row.user || row.username || row.CardID || row.card_id || row.id || 'Card User';
-        const ip = row.ip || row.ip_address || row.source || '192.168.1.100';
-        
-        let hour = 12;
-        if (row.hour !== undefined) hour = Number(row.hour);
-        else if (row.Time !== undefined) hour = Math.floor(Number(row.Time) / 3600) % 24;
-        else if (row.time !== undefined) hour = Math.floor(Number(row.time) / 3600) % 24;
-
-        let bytesTransferred = 50000;
-        if (row.bytes !== undefined) bytesTransferred = Number(row.bytes);
-        else if (row.Amount !== undefined) bytesTransferred = Number(row.Amount);
-        else if (row.amount !== undefined) bytesTransferred = Number(row.amount);
-
-        let failedLogins = 0;
-        if (row.failed_logins !== undefined) failedLogins = Number(row.failed_logins);
-        else if (row.Class !== undefined && Number(row.Class) === 1) failedLogins = 8;
-        else if (row.class !== undefined && Number(row.class) === 1) failedLogins = 8;
-        
-        return {
-          user,
-          department: row.department || 'Finance',
-          dataset: datasetLabel,
-          action: row.action || (row.Class || row.class ? 'CREDIT_CARD_TX' : 'ACCESS'),
-          hour,
-          bytes: bytesTransferred,
-          failed_logins: failedLogins,
-          ip
-        };
-      });
-
+    if (isTransactionOrAccessLog(rows)) {
+      const mappedLogs = mapRowsToSecurityLogs(rows, datasetLabel);
       try {
-        const { securityService } = require('./security.service');
         await securityService.logAccess({
           organizationId: input.organizationId,
           requestedById: input.uploadedById,
@@ -272,8 +137,8 @@ export const datasetService = {
       ...updated,
       sizeBytes: Number(updated.sizeBytes),
       insights: {
-        analysisId: analysisResult?.analysis.id,
-        reportId: analysisResult?.report?.id,
+        analysisId,
+        // report created async by worker
         qualityScore,
         anomalyScore,
         issues,
@@ -303,46 +168,53 @@ export const datasetService = {
     }
 
     const content = fs.readFileSync(dataset.storagePath);
+    const contentHash = crypto.createHash('sha256').update(content).digest('hex');
     const contentStr = content.toString('utf-8');
     const parsed = parseDatasetRows(contentStr, dataset.name || dataset.storagePath);
     const rows = normalizeRows(parsed.rows);
     const totalRowCount = parsed.totalRowCount;
 
     const projectId = dataset.projectId;
-    let analysisResult: Awaited<ReturnType<typeof analysisService.runAnalysis>> | null = null;
+    let analysisId: string | undefined;
     let innerResult: any = {};
-    let qualityScore = 95.0;
-    let anomalyScore = 0.05;
+    let qualityScore = (dataset.metadata as any)?.qualityScore ?? 95.0;
+    let anomalyScore = (dataset.metadata as any)?.anomalyScore ?? 0.05;
 
-    try {
-      analysisResult = await analysisService.runAnalysis({
-        organizationId,
-        projectId,
-        datasetId: dataset.id,
-        requestedById: dataset.uploadedById,
-        type: AnalysisType.QUALITY,
-        payload: { rows },
-      });
-
-      innerResult = (analysisResult.result as any)?.result || {};
-      qualityScore = innerResult.quality_score !== undefined ? Number(innerResult.quality_score) : qualityScore;
-      anomalyScore = innerResult.anomaly_score !== undefined ? Number(innerResult.anomaly_score) : anomalyScore;
-    } catch (err) {
-      console.error('Dataset validation analysis failed, returning cached snapshot:', err);
+    const unchanged = contentHash === dataset.sourceHash;
+    if (unchanged) {
+      // skip re-analysis thanks to sourceHash + ai content cache (phase 3+5)
+      analysisId = (dataset.metadata as any)?.lastAnalysisId;
+    } else {
+      try {
+        const enq = await analysisService.enqueue({
+          organizationId,
+          projectId,
+          datasetId: dataset.id,
+          requestedById: dataset.uploadedById,
+          type: AnalysisType.QUALITY,
+          payload: { rows },
+        });
+        analysisId = enq.analysisId;
+        // scores will be available after worker or via re-validate (now cached in ai)
+      } catch (err) {
+        console.error('Dataset validation analysis enqueue failed, returning cached snapshot:', err);
+      }
     }
 
     const updated = await prisma.dataset.update({
       where: { id: dataset.id },
       data: {
         rowCount: rows.length,
+        sourceHash: contentHash, // update in case name etc changed but content same? keep
         metadata: {
           ...(dataset.metadata as Record<string, any> || {}),
           qualityScore,
           anomalyScore,
-          issues: innerResult.issues || [],
-          recommendations: innerResult.recommendations || [],
+          issues: innerResult.issues || (dataset.metadata as any)?.issues || [],
+          recommendations: innerResult.recommendations || (dataset.metadata as any)?.recommendations || [],
           rowPreview: rows.slice(0, 5),
           lastCheckedAt: new Date().toISOString(),
+          lastAnalysisId: analysisId,
         },
       },
     });
@@ -351,12 +223,11 @@ export const datasetService = {
       ...updated,
       sizeBytes: Number(updated.sizeBytes),
       insights: {
-        analysisId: analysisResult?.analysis.id,
-        reportId: analysisResult?.report?.id,
+        analysisId,
         qualityScore,
         anomalyScore,
-        issues: innerResult.issues || [],
-        recommendations: innerResult.recommendations || [],
+        issues: innerResult.issues || (dataset.metadata as any)?.issues || [],
+        recommendations: innerResult.recommendations || (dataset.metadata as any)?.recommendations || [],
       },
     };
   },

@@ -32,7 +32,7 @@ def run_quality_agent(payload: dict):
         anomaly_score = float(anomalous_points / len(raw_anomaly_scores))
 
     quality_score = max(0.0, 100.0 - (missing_ratio * 60) - min(duplicates, 100) * 0.2 - anomaly_score * 120)
-    llm_result = ask_ollama_json(
+    llm_result, llm_used = ask_ollama_json(
         model=settings.model_quality,
         system_prompt="You are a data quality analyst. Return only JSON with keys summary, issues, recommendations, and confidence_notes.",
         user_prompt=json.dumps(
@@ -67,4 +67,5 @@ def run_quality_agent(payload: dict):
             "Investigate outlier clusters for schema drift",
         ] + list(llm_result.get("recommendations", [])),
         "confidence_notes": llm_result.get("confidence_notes", []),
+        "llm_used": llm_used,
     }
